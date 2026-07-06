@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>블로그 오운드 마케팅 성과 대시보드</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js" integrity="sha384-iU8HYtnGQ8Cy4zl7gbNMOhsDTTKX02BTXptVP/vqAWIaTfM7isw76iyZCsjL2eVi" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/gridjs@5.0.2/dist/gridjs.umd.js" integrity="sha384-/XXDzxe4FsGiAe50i/u9pY/Vy/uX654MHB1xoc1BJNnH1WXHhqHga9g3q5tF4gj7" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridjs@5.0.2/dist/theme/mermaid.min.css" integrity="sha384-jZvDSsmGB9oGGT/4l9bHXGoAv1OxvG/cFmSo0dZaSqmBgvQTKDBFAMftlXTmMbNW" crossorigin="anonymous">
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f6f7fb;
+    --card: #ffffff;
+    --border: #e5e7ee;
+    --text: #1f2430;
+    --muted: #6b7280;
+    --accent: #4f46e5;
+    --accent-soft: #eef0fe;
+    --good: #0f9d58;
+    --bad: #d93025;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Pretendard", "Apple SD Gothic Neo", sans-serif;
+    padding: 24px;
+  }
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .header h1 { font-size: 22px; margin: 0 0 4px 0; }
+  .header .sub { color: var(--muted); font-size: 13px; }
+  .header .meta { text-align: right; font-size: 12px; color: var(--muted); }
+  .header .meta a { color: var(--accent); text-decoration: none; }
+  .banner {
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 13px;
+    margin-bottom: 16px;
+    display: none;
+  }
+  .banner.error { background: #fdecea; color: var(--bad); display: block; }
+  .banner.info { background: var(--accent-soft); color: var(--accent); display: block; }
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+  .kpi-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 16px 18px;
+  }
+  .kpi-card .label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .kpi-card .value { font-size: 26px; font-weight: 700; }
+  .kpi-card .delta { font-size: 12px; margin-top: 6px; font-weight: 600; }
+  .delta.up { color: var(--good); }
+  .delta.down { color: var(--bad); }
+  .delta.flat { color: var(--muted); }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px 20px;
+    margin-bottom: 20px;
+  }
+  .card h2 { font-size: 15px; margin: 0 0 12px 0; }
+  .card .note { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  .chart-wrap { position: relative; height: 260px; }
+  #top-content-grid { font-size: 13px; }
+  .week-label { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+  .gridjs-table { font-size: 13px; }
+  .empty { color: var(--muted); font-size: 13px; padding: 20px 0; text-align: center; }
+</style>
+</head>
+<body>
+
+  <div class="header">
+    <div>
+      <h1>블로그 오운드 마케팅 성과 대시보드</h1>
+      <div class="sub">GA4 주간 자동 수집 데이터 · blog.uphone.app</div>
+    </div>
+    <div class="meta">
+      <div>마지막 확인: <span id="last-updated">-</span></div>
+      <div><a href="https://docs.google.com/spreadsheets/d/19_wofUZ0jOft-Joort8B6R0caAF1m5hldv8TwUpefoc/edit" target="_blank" rel="noopener">원본 시트 열기 ↗</a></div>
+    </div>
+  </div>
+
+  <div id="banner-error" class="banner error"></div>
+  <div id="banner-info" class="banner info"></div>
+
+  <div class="kpi-grid" id="kpi-grid">
+    <div class="kpi-card"><div class="label">조회수 (Views)</div><div class="value">-</div></div>
+    <div class="kpi-card"><div class="label">활성 사용자</div><div class="value">-</div></div>
+    <div class="kpi-card"><div class="label">평균 참여 시간</div><div class="value">-</div></div>
+    <div class="kpi-card"><div class="label">참여율</div><div class="value">-</div></div>
+  </div>
+
+  <div class="card">
+    <h2>주간 트렌드</h2>
+    <div class="chart-wrap"><canvas id="trend-chart"></canvas></div>
+  </div>
+
+  <div class="card">
+    <h2>이번 주 콘텐츠별 성과 TOP 10</h2>
+    <div class="week-label" id="top-week-label"></div>
+    <div id="top-content-grid"></div>
+  </div>
+
+  <div class="card" id="channel-card" style="display:none;">
+    <h2>채널(소스/매체)별 유입 — 최신 주</h2>
+    <div id="channel-grid"></div>
+  </div>
+
+  <div class="card" id="fallback-card" style="display:none;">
+    <h2>원본 데이터</h2>
+    <div class="note">자동 표 인식에 실패해 원본 텍스트를 그대로 표시합니다.</div>
+    <pre id="fallback-text" style="white-space:pre-wrap;font-size:12px;max-height:400px;overflow:auto;"></pre>
+  </div>
+
+  <script>
+    const FILE_ID = "19_wofUZ0jOft-Joort8B6R0caAF1m5hldv8TwUpefoc";
+    const TOOL_NAME = "mcp__8305374b-be53-44c8-8205-42d459419480__read_file_content";
+    const CACHE_KEY = "bcm_blog_dashboard_cache_v1";
+
+    const fmtInt = (n) => new Intl.NumberFormat('ko-KR').format(Math.round(n));
+    const fmtSec = (n) => {
+      const s = Math.round(n);
+      if (s < 60) return s + '초';
+      const m = Math.floor(s / 60), r = s % 60;
+      return m + '분 ' + r + '초';
+    };
+
+    function unescapeMd(str) {
+      return String(str).replace(/\\([\[\]\\*_`~|])/g, '$1').trim();
+    }
+
+    // ---- Parser: GFM pipe table (no fenced code, no sheet name) ----
+    function parsePipeTable(text) {
+      const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0 && l.startsWith('|'));
+      const PLACEHOLDER = "@@PIPE@@";
+      const rows = lines.map(line => {
+        const protectedLine = line.split('\\|').join(PLACEHOLDER);
+        let cells = protectedLine.split('|').map(c => c.trim());
+        if (cells.length && cells[0] === '') cells.shift();
+        if (cells.length && cells[cells.length - 1] === '') cells.pop();
+        return cells.map(c => unescapeMd(c.split(PLACEHOLDER).join('|')));
+      });
+      const isSeparator = (row) => row.length > 0 && row.every(c => /^:?-{1,}:?$/.test(c));
+      const isBlank = (row) => row.every(c => c === '');
+      const dataRows = rows.filter(r => !isSeparator(r));
+      const headerIdx = dataRows.findIndex(r => !isBlank(r));
+      if (headerIdx === -1) return null;
+      const headers = dataRows[headerIdx];
+      const records = dataRows.slice(headerIdx + 1)
+        .filter(r => !isBlank(r))
+        .map(r => {
+          const obj = {};
+          headers.forEach((h, i) => { obj[h] = r[i] !== undefined ? r[i] : ''; });
+          return obj;
+        });
+      return { name: null, headers, records };
+    }
+
+    // ---- Parser: simple CSV line (handles quoted commas) ----
+    function parseCSVLine(line) {
+      const result = [];
+      let cur = '', inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (inQuotes) {
+          if (ch === '"') {
+            if (line[i + 1] === '"') { cur += '"'; i++; } else { inQuotes = false; }
+          } else cur += ch;
+        } else {
+          if (ch === '"') inQuotes = true;
+          else if (ch === ',') { result.push(cur); cur = ''; }
+          else cur += ch;
+        }
+      }
+      result.push(cur);
+      return result;
+    }
+
+    // ---- Parser: "# SheetName" + fenced CSV blocks ----
+    function parseFencedSheets(text) {
+      const sheets = [];
+      const fence = String.fromCharCode(96, 96, 96);
+      const blockRegex = new RegExp('^#\\s*(.+?)\\s*$\\n+' + fence + '[^\\n]*\\n([\\s\\S]*?)\\n' + fence, 'gm');
+      let m;
+      while ((m = blockRegex.exec(text)) !== null) {
+        const name = m[1].replace(/\\_/g, '_').trim();
+        const csvLines = m[2].split('\n').filter(l => l.trim().length > 0);
+        if (csvLines.length === 0) continue;
+        const headers = parseCSVLine(csvLines[0]).map(h => h.trim());
+        const records = csvLines.slice(1).map(line => {
+          const cells = parseCSVLine(line);
+          const obj = {};
+          headers.forEach((h, i) => { obj[h] = cells[i] !== undefined ? cells[i].trim() : ''; });
+          return obj;
+        });
+        sheets.push({ name, headers, records });
+      }
+      return sheets;
+    }
+
+    function parseSheets(text) {
+      if (!text) return [];
+      const fence = String.fromCharCode(96, 96, 96);
+      if (text.includes(fence) && /^#\s/m.test(text)) {
+        const fenced = parseFencedSheets(text);
+        if (fenced.length > 0) return fenced;
+      }
+      const single = parsePipeTable(text);
+      return single ? [single] : [];
+    }
+
+    function findSheet(sheets, mustInclude, mustExclude) {
+      mustExclude = mustExclude || [];
+      return sheets.find(s =>
+        mustInclude.every(k => s.headers.some(h => h.includes(k))) &&
+        !mustExclude.some(k => s.headers.some(h => h.includes(k)))
+      );
+    }
+
+    function weekKey(rec) { return (rec['시작일'] || '') + '~' + (rec['종료일'] || ''); }
+    function weekLabel(rec) {
+      const s = (rec['시작일'] || '').slice(5).replace('-', '/');
+      const e = (rec['종료일'] || '').slice(5).replace('-', '/');
+      return s + ' ~ ' + e;
+    }
+
+    function num(v) {
+      const n = parseFloat(String(v).replace(/,/g, ''));
+      return isNaN(n) ? 0 : n;
+    }
+
+    // ---- Normalize both sheet schemas into a common per-page-per-week row shape ----
+    // Schema A (콘텐츠별_주간성과): 조회수/활성사용자/평균참여시간/이벤트수, 참여율 없음.
+    function normalizeContentOnly(records) {
+      return records.map(r => ({
+        '시작일': r['시작일'], '종료일': r['종료일'],
+        title: r['페이지 제목'] || '',
+        primary: num(r['조회수 (Views)']),
+        users: num(r['활성 사용자']),
+        engagement: num(r['평균 참여 시간 (초)']),
+        events: num(r['이벤트 수']),
+        rate: null,
+        participSessions: null
+      }));
+    }
+    // Schema B (콘텐츠_소스매체_통합): 여러 소스/매체 행을 페이지 단위로 합산, 참여율 계산 가능.
+    function normalizeIntegrated(records) {
+      const map = new Map();
+      records.forEach(r => {
+        const key = weekKey(r) + '||' + (r['페이지 제목'] || '');
+        if (!map.has(key)) {
+          map.set(key, { '시작일': r['시작일'], '종료일': r['종료일'], title: r['페이지 제목'] || '', sessions: 0, users: 0, particip: 0, engWeighted: 0 });
+        }
+        const a = map.get(key);
+        const s = num(r['세션 수']);
+        a.sessions += s;
+        a.users += num(r['활성 사용자']);
+        a.particip += num(r['참여 세션 수']);
+        a.engWeighted += num(r['평균 참여 시간 (초)']) * s;
+      });
+      return [...map.values()].map(a => ({
+        '시작일': a['시작일'], '종료일': a['종료일'], title: a.title,
+        primary: a.sessions,
+        users: a.users,
+        engagement: a.sessions > 0 ? a.engWeighted / a.sessions : 0,
+        events: null,
+        rate: a.sessions > 0 ? (a.particip / a.sessions) * 100 : 0,
+        participSessions: a.particip
+      }));
+    }
+
+    function deltaHtml(curr, prev) {
+      if (prev === 0 || prev === undefined || prev === null) {
+        return '<div class="delta flat">이전 주 데이터 없음</div>';
+      }
+      const pct = ((curr - prev) / prev) * 100;
+      const cls = pct > 0.5 ? 'up' : (pct < -0.5 ? 'down' : 'flat');
+      const arrow = pct > 0.5 ? '▲' : (pct < -0.5 ? '▼' : '·');
+      return '<div class="delta ' + cls + '">' + arrow + ' ' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '% 전주 대비</div>';
+    }
+
+    function deltaHtmlPP(curr, prev) {
+      if (prev === undefined || prev === null) {
+        return '<div class="delta flat">이전 주 데이터 없음</div>';
+      }
+      const diff = curr - prev;
+      const cls = diff > 0.05 ? 'up' : (diff < -0.05 ? 'down' : 'flat');
+      const arrow = diff > 0.05 ? '▲' : (diff < -0.05 ? '▼' : '·');
+      return '<div class="delta ' + cls + '">' + arrow + ' ' + (diff >= 0 ? '+' : '') + diff.toFixed(1) + '%p 전주 대비</div>';
+    }
+
+    function renderKpis(weeks, meta) {
+      const grid = document.getElementById('kpi-grid');
+      if (weeks.length === 0) {
+        grid.innerHTML = '<div class="empty">표시할 주간 데이터가 없습니다.</div>';
+        return;
+      }
+      const latest = weeks[weeks.length - 1];
+      const prev = weeks.length > 1 ? weeks[weeks.length - 2] : null;
+      const fourthCard = meta.hasRate
+        ? { label: '참여율 · ' + latest.label, value: latest.rate.toFixed(1) + '%', html: deltaHtmlPP(latest.rate, prev ? prev.rate : null) }
+        : { label: '이벤트 수 · ' + latest.label, value: fmtInt(latest.events), html: deltaHtml(latest.events, prev ? prev.events : 0) };
+      const cards = [
+        { label: meta.primaryLabel + ' · ' + latest.label, value: fmtInt(latest.primary), html: deltaHtml(latest.primary, prev ? prev.primary : 0) },
+        { label: '활성 사용자 · ' + latest.label, value: fmtInt(latest.users), html: deltaHtml(latest.users, prev ? prev.users : 0) },
+        { label: '평균 참여 시간 · ' + latest.label, value: fmtSec(latest.avgEngagement), html: deltaHtml(latest.avgEngagement, prev ? prev.avgEngagement : 0) },
+        fourthCard,
+      ];
+      grid.innerHTML = cards.map(c =>
+        '<div class="kpi-card"><div class="label">' + c.label + '</div><div class="value">' + c.value + '</div>' + c.html + '</div>'
+      ).join('');
+    }
+
+    let trendChartInstance = null;
+    function renderTrendChart(weeks, meta) {
+      const ctx = document.getElementById('trend-chart');
+      if (trendChartInstance) trendChartInstance.destroy();
+      if (weeks.length === 0) return;
+      trendChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: weeks.map(w => w.label),
+          datasets: [
+            {
+              label: meta.primaryLabel,
+              data: weeks.map(w => w.primary),
+              borderColor: '#4f46e5',
+              backgroundColor: 'rgba(79,70,229,0.12)',
+              tension: 0.3,
+              fill: true,
+              yAxisID: 'y'
+            },
+            {
+              label: '활성 사용자',
+              data: weeks.map(w => w.users),
+              borderColor: '#0f9d58',
+              backgroundColor: 'rgba(15,157,88,0.10)',
+              tension: 0.3,
+              fill: true,
+              yAxisID: 'y'
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          scales: { y: { beginAtZero: true } },
+          plugins: { legend: { position: 'bottom' } }
+        }
+      });
+    }
+
+    function renderTopContent(latestWeekRows, meta) {
+      document.getElementById('top-content-grid').innerHTML = '';
+      if (!latestWeekRows || latestWeekRows.length === 0) {
+        document.getElementById('top-content-grid').innerHTML = '<div class="empty">데이터가 없습니다.</div>';
+        return;
+      }
+      const sorted = [...latestWeekRows].sort((a, b) => b.primary - a.primary).slice(0, 10);
+      new gridjs.Grid({
+        columns: [
+          { name: '페이지 제목', width: '40%' },
+          { name: meta.primaryLabel },
+          { name: '활성 사용자' },
+          { name: '평균 참여(초)' },
+          { name: meta.hasRate ? '참여율 (%)' : '이벤트 수' }
+        ],
+        data: sorted.map(r => [
+          r.title,
+          Math.round(r.primary),
+          Math.round(r.users),
+          Math.round(r.engagement),
+          meta.hasRate ? r.rate.toFixed(1) : Math.round(r.events)
+        ]),
+        sort: true,
+        search: true,
+        pagination: { limit: 10 }
+      }).render(document.getElementById('top-content-grid'));
+    }
+
+    function renderChannel(channelSheet) {
+      const card = document.getElementById('channel-card');
+      if (!channelSheet || channelSheet.records.length === 0) {
+        card.style.display = 'none';
+        return;
+      }
+      card.style.display = 'block';
+      const weeks = [...new Set(channelSheet.records.map(weekKey))].sort();
+      const latestKey = weeks[weeks.length - 1];
+      const latestRecords = channelSheet.records.filter(r => weekKey(r) === latestKey);
+      const byChannel = {};
+      latestRecords.forEach(r => {
+        const ch = r['채널 그룹'] || r['채널그룹'] || r['매체 (Medium)'] || '기타';
+        if (!byChannel[ch]) byChannel[ch] = { sessions: 0, users: 0 };
+        byChannel[ch].sessions += num(r['세션 수']);
+        byChannel[ch].users += num(r['활성 사용자']);
+      });
+      const rows = Object.entries(byChannel).sort((a, b) => b[1].sessions - a[1].sessions);
+      document.getElementById('channel-grid').innerHTML = '';
+      new gridjs.Grid({
+        columns: ['채널 그룹', '세션 수', '활성 사용자'],
+        data: rows.map(([ch, v]) => [ch, fmtInt(v.sessions), fmtInt(v.users)]),
+        sort: true
+      }).render(document.getElementById('channel-grid'));
+    }
+
+    function buildWeeklyAggregates(normRows) {
+      const map = new Map();
+      normRows.forEach(r => {
+        const key = weekKey(r);
+        if (!map.has(key)) {
+          map.set(key, { label: weekLabel(r), sortKey: r['시작일'] || '', primary: 0, users: 0, events: 0, hasEvents: false, participSessions: 0, hasRate: false, engagementWeighted: 0 });
+        }
+        const agg = map.get(key);
+        agg.primary += r.primary;
+        agg.users += r.users;
+        agg.engagementWeighted += r.engagement * r.primary;
+        if (r.events !== null) { agg.events += r.events; agg.hasEvents = true; }
+        if (r.rate !== null) { agg.participSessions += (r.participSessions || 0); agg.hasRate = true; }
+      });
+      const weeks = [...map.values()].sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+      weeks.forEach(w => {
+        w.avgEngagement = w.primary > 0 ? w.engagementWeighted / w.primary : 0;
+        w.rate = w.hasRate && w.primary > 0 ? (w.participSessions / w.primary) * 100 : null;
+      });
+      return weeks;
+    }
+
+    function showError(msg) {
+      const el = document.getElementById('banner-error');
+      el.textContent = msg;
+      el.style.display = 'block';
+    }
+    function showInfo(msg) {
+      const el = document.getElementById('banner-info');
+      el.textContent = msg;
+      el.style.display = 'block';
+    }
+
+    function renderFromContentSheet(sheet, isIntegrated) {
+      const normRows = isIntegrated ? normalizeIntegrated(sheet.records) : normalizeContentOnly(sheet.records);
+      const meta = {
+        primaryLabel: isIntegrated ? '세션 수' : '조회수 (Views)',
+        hasRate: isIntegrated
+      };
+      const weeks = buildWeeklyAggregates(normRows);
+      renderKpis(weeks, meta);
+      renderTrendChart(weeks, meta);
+      if (weeks.length > 0) {
+        const latestKey = weeks[weeks.length - 1].sortKey;
+        document.getElementById('top-week-label').textContent = weeks[weeks.length - 1].label + ' 기준';
+        const latestRows = normRows.filter(r => (r['시작일'] || '') === latestKey);
+        renderTopContent(latestRows, meta);
+      }
+    }
+
+    function renderFallback(rawText) {
+      document.getElementById('fallback-card').style.display = 'block';
+      document.getElementById('fallback-text').textContent = rawText.slice(0, 5000);
+    }
+
+    async function loadData() {
+      document.getElementById('banner-error').style.display = 'none';
+      try {
+        const res = await window.cowork.callMcpTool(TOOL_NAME, { fileId: FILE_ID });
+        if (res.isError) throw new Error('커넥터 오류: ' + JSON.stringify(res.content));
+        const data = res.structuredContent ?? JSON.parse(res.content[0].text);
+        const text = data.fileContent || '';
+        const sheets = parseSheets(text);
+
+        const integratedSheet = findSheet(sheets, ['페이지 제목', '소스']);
+        const contentOnlySheet = findSheet(sheets, ['페이지 제목', '조회수'], ['소스']);
+        const channelOnlySheet = findSheet(sheets, ['소스'], ['페이지 제목']);
+
+        if (!integratedSheet && !contentOnlySheet && !channelOnlySheet) {
+          renderFallback(text || '(빈 응답)');
+          showInfo('현재 시트에서 자동 인식 가능한 표를 찾지 못했습니다. 원본 시트를 열어 데이터를 확인해 주세요.');
+        } else {
+          document.getElementById('fallback-card').style.display = 'none';
+        }
+
+        if (integratedSheet) {
+          renderFromContentSheet(integratedSheet, true);
+          renderChannel(integratedSheet);
+        } else if (contentOnlySheet) {
+          renderFromContentSheet(contentOnlySheet, false);
+          document.getElementById('channel-card').style.display = 'none';
+          showInfo('참여율은 "콘텐츠_소스매체_통합" 탭에만 있는 데이터예요. 연동 도구는 시트의 맨 앞(첫 번째) 탭만 가져올 수 있어서, 지금은 "콘텐츠별_주간성과" 탭 기준(이벤트 수)으로 표시 중입니다. 참여율이 필요할 땐 원본 시트를 열어 "콘텐츠_소스매체_통합" 탭에서 직접 확인해 주세요.');
+        } else if (channelOnlySheet) {
+          renderChannel(channelOnlySheet);
+          document.getElementById('kpi-grid').innerHTML = '';
+          document.getElementById('top-content-grid').innerHTML = '';
+          showInfo('현재 "소스매체별_주간성과" 탭이 맨 앞이라 채널 데이터만 표시됩니다. 콘텐츠 성과/참여율은 원본 시트의 "콘텐츠_소스매체_통합" 탭에서 확인해 주세요.');
+        }
+
+        const now = new Date();
+        document.getElementById('last-updated').textContent = now.toLocaleString('ko-KR');
+        localStorage.setItem(CACHE_KEY, JSON.stringify({ text, savedAt: now.toISOString() }));
+      } catch (err) {
+        console.error('loadData failed', err);
+        const cached = localStorage.getItem(CACHE_KEY);
+        if (cached) {
+          try {
+            const { text, savedAt } = JSON.parse(cached);
+            const sheets = parseSheets(text);
+            const integratedSheet = findSheet(sheets, ['페이지 제목', '소스']);
+            const contentOnlySheet = findSheet(sheets, ['페이지 제목', '조회수'], ['소스']);
+            const channelOnlySheet = findSheet(sheets, ['소스'], ['페이지 제목']);
+            if (integratedSheet) {
+              renderFromContentSheet(integratedSheet, true);
+              renderChannel(integratedSheet);
+            } else if (contentOnlySheet) {
+              renderFromContentSheet(contentOnlySheet, false);
+            } else if (channelOnlySheet) {
+              renderChannel(channelOnlySheet);
+            }
+            document.getElementById('last-updated').textContent = new Date(savedAt).toLocaleString('ko-KR') + ' (캐시)';
+            showError('실시간 갱신에 실패해 마지막으로 불러온 데이터를 표시 중입니다: ' + err.message);
+          } catch (e2) {
+            showError('데이터를 불러오지 못했습니다: ' + err.message);
+          }
+        } else {
+          showError('데이터를 불러오지 못했습니다: ' + err.message);
+        }
+      }
+    }
+
+    loadData();
+  </script>
+</body>
+</html>
