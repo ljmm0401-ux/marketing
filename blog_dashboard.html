@@ -128,9 +128,14 @@
   </div>
 
   <script>
-    const FILE_ID = "19_wofUZ0jOft-Joort8B6R0caAF1m5hldv8TwUpefoc";
-    const TOOL_NAME = "mcp__8305374b-be53-44c8-8205-42d459419480__read_file_content";
-    const CACHE_KEY = "bcm_blog_dashboard_cache_v1";
+    // ==================== Google Sheets API 설정 ====================
+    // 1) https://console.cloud.google.com 에서 프로젝트 생성 후 "Google Sheets API" 사용 설정
+    // 2) 사용자 인증 정보 > API 키 생성 (HTTP 리퍼러 제한 권장)
+    // 3) 스프레드시트 공유 설정: "링크가 있는 모든 사용자 - 뷰어"
+    const SPREADSHEET_ID = "19_wofUZ0jOft-Joort8B6R0caAF1m5hldv8TwUpefoc";
+    const API_KEY = "";  // ← 여기에 Google Cloud API 키 입력
+    const SHEETS_API_BASE = "https://sheets.googleapis.com/v4/spreadsheets";
+    const CACHE_KEY = "bcm_blog_dashboard_cache_v2";
 
     const fmtInt = (n) => new Intl.NumberFormat('ko-KR').format(Math.round(n));
     const fmtSec = (n) => {
@@ -140,88 +145,81 @@
       return m + '분 ' + r + '초';
     };
 
-    function unescapeMd(str) {
-      return String(str).replace(/\\([\[\]\\*_`~|])/g, '$1').trim();
+    // ==================== Google Sheets API 호출 ====================
+    // 날짜 셀 정규화: 시리얼 숫자(구글시트 내부값) 또는 다양한 문자열 형식 → 'YYYY-MM-DD'
+    function normalizeDateCell(v) {
+      if (v === undefined || v === null || v === '') return '';
+      // 구글시트 날짜 시리얼 숫자 (기준일 1899-12-30)
+      if (typeof v === 'number') {
+        const d = new Date(Date.UTC(1899, 11, 30) + v * 86400000);
+        return d.toISOString().slice(0, 10);
+      }
+      const s = String(v).trim();
+      // 이미 YYYY-MM-DD
+      let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (m) return m[1] + '-' + m[2] + '-' + m[3];
+      // '2026. 1. 5.' / '2026.01.05' / '2026/1/5' 등
+      m = s.match(/^(\d{4})[.\/\-]\s*(\d{1,2})[.\/\-]\s*(\d{1,2})/);
+      if (m) return m[1] + '-' + m[2].padStart(2, '0') + '-' + m[3].padStart(2, '0');
+      return s;
     }
+    const isDateHeader = (h) => h.includes('시작일') || h.includes('종료일');
 
-    // ---- Parser: GFM pipe table (no fenced code, no sheet name) ----
-    function parsePipeTable(text) {
-      const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0 && l.startsWith('|'));
-      const PLACEHOLDER = "@@PIPE@@";
-      const rows = lines.map(line => {
-        const protectedLine = line.split('\\|').join(PLACEHOLDER);
-        let cells = protectedLine.split('|').map(c => c.trim());
-        if (cells.length && cells[0] === '') cells.shift();
-        if (cells.length && cells[cells.length - 1] === '') cells.pop();
-        return cells.map(c => unescapeMd(c.split(PLACEHOLDER).join('|')));
-      });
-      const isSeparator = (row) => row.length > 0 && row.every(c => /^:?-{1,}:?$/.test(c));
-      const isBlank = (row) => row.every(c => c === '');
-      const dataRows = rows.filter(r => !isSeparator(r));
-      const headerIdx = dataRows.findIndex(r => !isBlank(r));
+    // 시트 값 2차원 배열([행][열]) → { name, headers, records } 형태로 변환
+    function valuesToSheet(name, values) {
+      if (!values || values.length === 0) return null;
+      // 첫 번째 비어있지 않은 행을 헤더로 사용
+      const headerIdx = values.findIndex(row => row && row.some(c => String(c).trim() !== ''));
       if (headerIdx === -1) return null;
-      const headers = dataRows[headerIdx];
-      const records = dataRows.slice(headerIdx + 1)
-        .filter(r => !isBlank(r))
-        .map(r => {
+      const headers = values[headerIdx].map(h => String(h).trim());
+      const records = values.slice(headerIdx + 1)
+        .filter(row => row && row.some(c => String(c).trim() !== ''))
+        .map(row => {
           const obj = {};
-          headers.forEach((h, i) => { obj[h] = r[i] !== undefined ? r[i] : ''; });
+          headers.forEach((h, i) => {
+            const raw = row[i] !== undefined ? row[i] : '';
+            obj[h] = isDateHeader(h) ? normalizeDateCell(raw) : String(raw).trim();
+          });
           return obj;
         });
-      return { name: null, headers, records };
+      return { name, headers, records };
     }
 
-    // ---- Parser: simple CSV line (handles quoted commas) ----
-    function parseCSVLine(line) {
-      const result = [];
-      let cur = '', inQuotes = false;
-      for (let i = 0; i < line.length; i++) {
-        const ch = line[i];
-        if (inQuotes) {
-          if (ch === '"') {
-            if (line[i + 1] === '"') { cur += '"'; i++; } else { inQuotes = false; }
-          } else cur += ch;
-        } else {
-          if (ch === '"') inQuotes = true;
-          else if (ch === ',') { result.push(cur); cur = ''; }
-          else cur += ch;
-        }
+    // 스프레드시트의 모든 탭 이름 조회 후 batchGet으로 전체 데이터 가져오기
+    async function fetchAllSheets() {
+      if (!API_KEY) {
+        throw new Error('API 키가 설정되지 않았습니다. 파일 상단의 API_KEY에 Google Cloud API 키를 입력해 주세요.');
       }
-      result.push(cur);
-      return result;
-    }
+      // 1) 탭(시트) 목록 조회
+      const metaUrl = SHEETS_API_BASE + '/' + SPREADSHEET_ID
+        + '?fields=sheets.properties.title&key=' + encodeURIComponent(API_KEY);
+      const metaRes = await fetch(metaUrl);
+      if (!metaRes.ok) {
+        const errBody = await metaRes.json().catch(() => null);
+        const reason = errBody?.error?.message || ('HTTP ' + metaRes.status);
+        throw new Error('시트 정보 조회 실패: ' + reason);
+      }
+      const meta = await metaRes.json();
+      const titles = (meta.sheets || []).map(s => s.properties.title);
+      if (titles.length === 0) throw new Error('스프레드시트에 탭이 없습니다.');
 
-    // ---- Parser: "# SheetName" + fenced CSV blocks ----
-    function parseFencedSheets(text) {
-      const sheets = [];
-      const fence = String.fromCharCode(96, 96, 96);
-      const blockRegex = new RegExp('^#\\s*(.+?)\\s*$\\n+' + fence + '[^\\n]*\\n([\\s\\S]*?)\\n' + fence, 'gm');
-      let m;
-      while ((m = blockRegex.exec(text)) !== null) {
-        const name = m[1].replace(/\\_/g, '_').trim();
-        const csvLines = m[2].split('\n').filter(l => l.trim().length > 0);
-        if (csvLines.length === 0) continue;
-        const headers = parseCSVLine(csvLines[0]).map(h => h.trim());
-        const records = csvLines.slice(1).map(line => {
-          const cells = parseCSVLine(line);
-          const obj = {};
-          headers.forEach((h, i) => { obj[h] = cells[i] !== undefined ? cells[i].trim() : ''; });
-          return obj;
-        });
-        sheets.push({ name, headers, records });
+      // 2) 모든 탭 데이터를 한 번의 batchGet으로 조회
+      const rangesQS = titles.map(t => 'ranges=' + encodeURIComponent("'" + t + "'")).join('&');
+      const valuesUrl = SHEETS_API_BASE + '/' + SPREADSHEET_ID
+        + '/values:batchGet?' + rangesQS
+        + '&valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING'
+        + '&key=' + encodeURIComponent(API_KEY);
+      const valRes = await fetch(valuesUrl);
+      if (!valRes.ok) {
+        const errBody = await valRes.json().catch(() => null);
+        const reason = errBody?.error?.message || ('HTTP ' + valRes.status);
+        throw new Error('시트 데이터 조회 실패: ' + reason);
       }
+      const valData = await valRes.json();
+      const sheets = (valData.valueRanges || [])
+        .map((vr, i) => valuesToSheet(titles[i], vr.values))
+        .filter(Boolean);
       return sheets;
-    }
-
-    function parseSheets(text) {
-      if (!text) return [];
-      const fence = String.fromCharCode(96, 96, 96);
-      if (text.includes(fence) && /^#\s/m.test(text)) {
-        const fenced = parseFencedSheets(text);
-        if (fenced.length > 0) return fenced;
-      }
-      const single = parsePipeTable(text);
-      return single ? [single] : [];
     }
 
     function findSheet(sheets, mustInclude, mustExclude) {
@@ -470,66 +468,63 @@
       }
     }
 
-    function renderFallback(rawText) {
+    function renderFallback(sheets) {
       document.getElementById('fallback-card').style.display = 'block';
-      document.getElementById('fallback-text').textContent = rawText.slice(0, 5000);
+      const summary = sheets.map(s =>
+        '# ' + s.name + '\n헤더: ' + s.headers.join(', ') + '\n행 수: ' + s.records.length
+      ).join('\n\n');
+      document.getElementById('fallback-text').textContent = summary || '(빈 응답)';
+    }
+
+    function renderSheets(sheets) {
+      const integratedSheet = findSheet(sheets, ['페이지 제목', '소스']);
+      const contentOnlySheet = findSheet(sheets, ['페이지 제목', '조회수'], ['소스']);
+      const channelOnlySheet = findSheet(sheets, ['소스'], ['페이지 제목']);
+
+      if (!integratedSheet && !contentOnlySheet && !channelOnlySheet) {
+        renderFallback(sheets);
+        showInfo('자동 인식 가능한 표를 찾지 못했습니다. 아래에 탭별 헤더 정보를 표시했으니 원본 시트 구조를 확인해 주세요.');
+        return;
+      }
+      document.getElementById('fallback-card').style.display = 'none';
+
+      if (integratedSheet) {
+        renderFromContentSheet(integratedSheet, true);
+        renderChannel(channelOnlySheet || integratedSheet);
+      } else if (contentOnlySheet) {
+        renderFromContentSheet(contentOnlySheet, false);
+        if (channelOnlySheet) {
+          renderChannel(channelOnlySheet);
+        } else {
+          document.getElementById('channel-card').style.display = 'none';
+        }
+        showInfo('"콘텐츠_소스매체_통합" 탭을 찾지 못해 "콘텐츠별_주간성과" 탭 기준(이벤트 수)으로 표시 중입니다. 참여율은 통합 탭이 있어야 계산할 수 있어요.');
+      } else if (channelOnlySheet) {
+        renderChannel(channelOnlySheet);
+        document.getElementById('kpi-grid').innerHTML = '';
+        document.getElementById('top-content-grid').innerHTML = '';
+        showInfo('채널(소스/매체) 데이터만 찾아 채널 표만 표시합니다. 콘텐츠 성과는 "페이지 제목" 열이 있는 탭이 필요해요.');
+      }
     }
 
     async function loadData() {
       document.getElementById('banner-error').style.display = 'none';
       try {
-        const res = await window.cowork.callMcpTool(TOOL_NAME, { fileId: FILE_ID });
-        if (res.isError) throw new Error('커넥터 오류: ' + JSON.stringify(res.content));
-        const data = res.structuredContent ?? JSON.parse(res.content[0].text);
-        const text = data.fileContent || '';
-        const sheets = parseSheets(text);
-
-        const integratedSheet = findSheet(sheets, ['페이지 제목', '소스']);
-        const contentOnlySheet = findSheet(sheets, ['페이지 제목', '조회수'], ['소스']);
-        const channelOnlySheet = findSheet(sheets, ['소스'], ['페이지 제목']);
-
-        if (!integratedSheet && !contentOnlySheet && !channelOnlySheet) {
-          renderFallback(text || '(빈 응답)');
-          showInfo('현재 시트에서 자동 인식 가능한 표를 찾지 못했습니다. 원본 시트를 열어 데이터를 확인해 주세요.');
-        } else {
-          document.getElementById('fallback-card').style.display = 'none';
-        }
-
-        if (integratedSheet) {
-          renderFromContentSheet(integratedSheet, true);
-          renderChannel(integratedSheet);
-        } else if (contentOnlySheet) {
-          renderFromContentSheet(contentOnlySheet, false);
-          document.getElementById('channel-card').style.display = 'none';
-          showInfo('참여율은 "콘텐츠_소스매체_통합" 탭에만 있는 데이터예요. 연동 도구는 시트의 맨 앞(첫 번째) 탭만 가져올 수 있어서, 지금은 "콘텐츠별_주간성과" 탭 기준(이벤트 수)으로 표시 중입니다. 참여율이 필요할 땐 원본 시트를 열어 "콘텐츠_소스매체_통합" 탭에서 직접 확인해 주세요.');
-        } else if (channelOnlySheet) {
-          renderChannel(channelOnlySheet);
-          document.getElementById('kpi-grid').innerHTML = '';
-          document.getElementById('top-content-grid').innerHTML = '';
-          showInfo('현재 "소스매체별_주간성과" 탭이 맨 앞이라 채널 데이터만 표시됩니다. 콘텐츠 성과/참여율은 원본 시트의 "콘텐츠_소스매체_통합" 탭에서 확인해 주세요.');
-        }
+        const sheets = await fetchAllSheets();
+        renderSheets(sheets);
 
         const now = new Date();
         document.getElementById('last-updated').textContent = now.toLocaleString('ko-KR');
-        localStorage.setItem(CACHE_KEY, JSON.stringify({ text, savedAt: now.toISOString() }));
+        try {
+          localStorage.setItem(CACHE_KEY, JSON.stringify({ sheets, savedAt: now.toISOString() }));
+        } catch (e) { /* 캐시 용량 초과 등은 무시 */ }
       } catch (err) {
         console.error('loadData failed', err);
         const cached = localStorage.getItem(CACHE_KEY);
         if (cached) {
           try {
-            const { text, savedAt } = JSON.parse(cached);
-            const sheets = parseSheets(text);
-            const integratedSheet = findSheet(sheets, ['페이지 제목', '소스']);
-            const contentOnlySheet = findSheet(sheets, ['페이지 제목', '조회수'], ['소스']);
-            const channelOnlySheet = findSheet(sheets, ['소스'], ['페이지 제목']);
-            if (integratedSheet) {
-              renderFromContentSheet(integratedSheet, true);
-              renderChannel(integratedSheet);
-            } else if (contentOnlySheet) {
-              renderFromContentSheet(contentOnlySheet, false);
-            } else if (channelOnlySheet) {
-              renderChannel(channelOnlySheet);
-            }
+            const { sheets, savedAt } = JSON.parse(cached);
+            renderSheets(sheets);
             document.getElementById('last-updated').textContent = new Date(savedAt).toLocaleString('ko-KR') + ' (캐시)';
             showError('실시간 갱신에 실패해 마지막으로 불러온 데이터를 표시 중입니다: ' + err.message);
           } catch (e2) {
